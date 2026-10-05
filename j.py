@@ -22,9 +22,7 @@ SK=os.path.expanduser("~/jskills.json")
 TM=["llama-3.3-70b-versatile","llama-3.1-8b-instant","llama3-70b-8192","openai/gpt-oss-20b"]
 WM=["whisper-large-v3","whisper-large-v3-turbo"]
 VOICES={"uz":"uz-UZ-MadinaNeural","en":"en-US-AriaNeural","ru":"ru-RU-SvetlanaNeural"}
-if not os.path.exists(C):
- print("SOZLASH:");o=input("TG ID: ");k=input("Groq: ");n=input("Ism: ") or "Janob"
- json.dump({"o":int(o),"k":k,"n":n,"v":"uz","d":"08:00","e":"","p":"","g":""},open(C,"w"))
+# Server rejimida input yo'q
 if not os.path.exists(SK): json.dump({},open(SK,"w"))
 try: c=json.load(open(C))
 except: c={}
@@ -772,5 +770,24 @@ async def main():
  log.info("Bot ishga tushdi")
  await bot.delete_webhook(drop_pending_updates=True)
  await dp.start_polling(bot)
+
+import threading
+
+# Render uchun minimal HTTP server (port 8080)
+def run_http():
+    try:
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+        class H(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type","text/plain")
+                self.end_headers()
+                self.wfile.write(b"JARVIS alive")
+            def log_message(self,*a):pass
+        HTTPServer(("0.0.0.0",8080),H).serve_forever()
+    except Exception as e:
+        pass
+
+threading.Thread(target=run_http,daemon=True).start()
 
 asyncio.run(main())
