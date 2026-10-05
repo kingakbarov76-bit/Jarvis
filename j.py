@@ -6,6 +6,12 @@ from aiogram.types import Message,FSInputFile
 from aiogram.filters import Command
 from aiogram.enums import ChatAction
 from groq import AsyncGroq
+
+sys.path.insert(0,os.path.expanduser('~'))
+try:
+    from skills_engine import save_skill, run_skill, list_skills
+except Exception:
+    save_skill = run_skill = list_skills = None
 try: import edge_tts
 except: edge_tts=None
 try: from pypdf import PdfReader
@@ -643,6 +649,37 @@ async def main():
   out=["🧠 Skillar:"]
   for k,v in d.items():out.append("• `"+k+"` — "+v["desc"][:60])
   await m.answer("\n".join(out),parse_mode="Markdown")
+
+ @dp.message(Command("newskill"))
+ async def h_newskill(m):
+  if not ok(m):return
+  if save_skill is None:return await m.answer("❌ Engine yo'q")
+  p=m.text[10:].split("|",1)
+  if len(p)<2:return await m.answer("Format: /newskill nom | python kodi")
+  name=p[0].strip().lower().replace(" ","_")
+  code=p[1].strip()
+  ok2,msg=await save_skill(name,code,"qo'lda yaratilgan")
+  if ok2:await m.answer(f"✅ `{name}` qo'shildi")
+  else:await m.answer(f"❌ {msg}")
+
+ @dp.message(Command("runskill"))
+ async def h_runskill(m):
+  if not ok(m):return
+  if run_skill is None:return await m.answer("❌ Engine yo'q")
+  p=m.text[10:].split(maxsplit=1)
+  if not p:return await m.answer("Format: /runskill nom [args]")
+  name=p[0];args=p[1] if len(p)>1 else ""
+  await m.answer("⏳...")
+  r=await run_skill(name,args)
+  await m.answer(str(r)[:3500])
+
+ @dp.message(Command("myskills"))
+ async def h_myskills(m):
+  if not ok(m):return
+  if list_skills is None:return await m.answer("❌ Engine yo'q")
+  s=list_skills()
+  if not s:return await m.answer("Skill yo'q")
+  await m.answer("🧠 Skillar:\n"+"\n".join(s),parse_mode="Markdown")
 
  @dp.message(Command("start"))
  async def h_start(m):
