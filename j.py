@@ -1,4 +1,4 @@
-import asyncio,logging,json,os,aiosqlite,tempfile,base64,httpx,re,time,datetime,imaplib,email,smtplib,sys,subprocess,shutil
+import asyncio,logging,json,os,ast,shutil,aiosqlite,tempfile,base64,httpx,re,time,datetime,imaplib,email,smtplib,sys,subprocess,shutil
 from email.mime.text import MIMEText
 from urllib.parse import quote_plus
 from aiogram import Bot,Dispatcher,F
@@ -294,6 +294,46 @@ async def approve(cid,aid):
  await db.commit()
  return True
 
+async def make_video(topic):
+ try:
+  prompt="Mavzu: "+topic+". Video uchun 3 ta sahna yoz. JSON format: {\"title\":\"...\",\"scenes\":[{\"text\":\"1-2 jumla ozbekcha\",\"img\":\"english image prompt\"}]}"
+  r=await g.chat.completions.create(model=TMx,messages=[{"role":"user","content":prompt}],max_tokens=800,response_format={"type":"json_object"})
+  script=json.loads(r.choices[0].message.content)
+ except Exception as e:
+  return None,"Skript xato: "+str(e)[:100]
+ vdir=os.path.join(tempfile.gettempdir(),"vid")
+ os.makedirs(vdir,exist_ok=True)
+ clips=[]
+ scenes=script.get("scenes",[])[:3]
+ for i,sc in enumerate(scenes):
+  img_url="https://image.pollinations.ai/prompt/"+quote_plus(sc.get("img",topic))+"?width=1080&height=1920&nologo=true"
+  img_p=os.path.join(vdir,"i"+str(i)+".jpg")
+  try:
+   async with httpx.AsyncClient(timeout=90) as cl:
+    r2=await cl.get(img_url)
+   with open(img_p,"wb") as f:f.write(r2.content)
+  except:continue
+  voice_p=os.path.join(vdir,"a"+str(i)+".mp3")
+  try:
+   if edge_tts:
+    await edge_tts.Communicate(sc.get("text","..."),"uz-UZ-MadinaNeural").save(voice_p)
+  except:continue
+  clip_p=os.path.join(vdir,"c"+str(i)+".mp4")
+  try:
+   subprocess.run(["ffmpeg","-y","-loop","1","-i",img_p,"-i",voice_p,"-shortest","-c:v","libx264","-t","10","-c:a","aac","-pix_fmt","yuv420p","-vf","scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2",clip_p],capture_output=True,timeout=180)
+   if os.path.exists(clip_p) and os.path.getsize(clip_p)>1000:clips.append(clip_p)
+  except:continue
+ if not clips:return None,"Sahnalar yaratilmadi"
+ list_p=os.path.join(vdir,"list.txt")
+ with open(list_p,"w") as f:
+  for c2 in clips:f.write("file "+repr(c2)+"\n")
+ final_p=os.path.join(vdir,"final_"+str(int(time.time()))+".mp4")
+ try:
+  subprocess.run(["ffmpeg","-y","-f","concat","-safe","0","-i",list_p,"-c","copy",final_p],capture_output=True,timeout=60)
+ except:return None,"Concat xato"
+ if os.path.exists(final_p):return final_p,script.get("title",topic)
+ return None,"Video yaratilmadi"
+
 async def ask(cid,txt,from_voice=False):
  await sv(cid,"user",txt)
  h=await hi(cid)
@@ -398,6 +438,130 @@ async def daily_loop():
   await daily_report()
   await asyncio.sleep(60)
 
+DSK=os.path.expanduser("~/dskills.json")
+
+def dsk_load():
+ try:return json.load(open(DSK))
+ except:return {}
+
+def dsk_save(d):
+ try:json.dump(d,open(DSK,"w"),ensure_ascii=False,indent=2)
+ except:pass
+
+async def write_skill(desc):
+ prompt=("Sen Python dasturchi. Bitta ASYNC funksiya yoz. "
+  "Signature: async def run(args: str) -> str:\n"
+  "args - foydalanuvchi stringi, return - javob string.\n"
+  "QOIDA: faqat standart kutubxona + httpx. "
+  "Kodni ```python ... ``` blokida ber, izohsiz.\n"
+  "VAZIFA: "+desc)
+ try:
+  r=await g.chat.completions.create(model=TMx,messages=[{"role":"user","content":prompt}],max_tokens=1500,temperature=0.2)
+  code=r.choices[0].message.content
+  if "```python" in code:code=code.split("```python")[1].split("```")[0].strip()
+  elif "```" in code:code=code.split("```")[1].split("```")[0].strip()
+  try:ast.parse(code)
+  except SyntaxError as e:return None,"Syntax: "+str(e)
+  ns={}
+  try:exec("import asyncio,httpx,os,json,re,subprocess,base64,time,datetime,tempfile\n"+code,ns)
+  except Exception as e:return None,"Exec: "+str(e)
+  if "run" not in ns:return None,"run() yoq"
+  if not asyncio.iscoroutinefunction(ns["run"]):return None,"run() async emas"
+  return {"code":code,"desc":desc},None
+ except Exception as e:return None,str(e)[:200]
+
+async def run_dskill(name,args):
+ d=dsk_load()
+ if name not in d:return "❌ Skill topilmadi: "+name
+ try:
+  ns={}
+  exec("import asyncio,httpx,os,json,re,subprocess,base64,time,datetime,tempfile\n"+d[name]["code"],ns)
+  return str(await ns["run"](args))
+ except Exception as e:return "❌ "+str(e)[:300]
+
+SVC_FILE=os.path.expanduser("~/services.json")
+SELF_BAK=os.path.expanduser("~/j.py.bak")
+
+def svc_load():
+ try:return json.load(open(SVC_FILE))
+ except:return {}
+
+def svc_save(d):
+ try:json.dump(d,open(SVC_FILE,"w"),ensure_ascii=False,indent=2)
+ except:pass
+
+async def call_service(name,payload):
+ d=svc_load()
+ if name not in d:return "❌ Service yoq: "+name
+ s=d[name]
+ try:
+  h={"Content-Type":"application/json"}
+  if s.get("key"):h["Authorization"]="Bearer "+s["key"]
+  async with httpx.AsyncClient(timeout=180) as cl:
+   r=await cl.post(s["url"],headers=h,json={"prompt":payload,"input":payload})
+  return r.text[:3000]
+ except Exception as e:return "❌ "+str(e)[:200]
+
+def backup_self():
+ try:
+  shutil.copy2(os.path.expanduser("~/j.py"),SELF_BAK)
+  return True
+ except:return False
+
+def test_code(code):
+ try:ast.parse(code);return True
+ except:return False
+
+async def safe_change(new_code):
+ if not test_code(new_code):return False
+ backup_self()
+ with open(os.path.expanduser("~/j.py"),"w") as f:f.write(new_code)
+ try:
+  r=subprocess.run(["python","-c","import ast;ast.parse(open('"+os.path.expanduser("~/j.py")+"').read())"],capture_output=True,text=True,timeout=20)
+  if r.returncode!=0:
+   shutil.copy2(SELF_BAK,os.path.expanduser("~/j.py"))
+   return False
+  return True
+ except:
+  shutil.copy2(SELF_BAK,os.path.expanduser("~/j.py"))
+  return False
+
+async def self_research():
+ try:
+  q="best free AI API 2025 video music voice"
+  ua="Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36"
+  async with httpx.AsyncClient(timeout=15,headers={"User-Agent":ua},follow_redirects=True) as cl:
+   r=await cl.post("https://lite.duckduckgo.com/lite/",data={"q":q})
+  sn=re.findall(r'class="result-snippet"[^>]*>(.*?)</td>',r.text,re.DOTALL)[:5]
+  return "\n".join(re.sub(r'<[^>]+>','',s).strip()[:150] for s in sn)
+ except:return ""
+
+async def self_evolve():
+ try:
+  research=await self_research()
+  h=await hi(O,30)
+  ctx="\n".join(m["content"][:150] for m in h[-15:])
+  svc=", ".join(svc_load().keys()) or "yoq"
+  prompt=("Sen JARVIS. O'zingni tahlil qil.\n"
+   "Internet: "+research[:500]+"\n"
+   "Suhbat: "+ctx[:800]+"\n"
+   "Xizmatlar: "+svc+"\n\n"
+   "1 jumlada: qanday yangi qobiliyat kerak? "
+   "Faqat o'zbekcha, 200 belgidan kam.")
+  r=await g.chat.completions.create(model=TMx,messages=[{"role":"user","content":prompt}],max_tokens=150)
+  idea=r.choices[0].message.content.strip().strip('"').strip("'")
+  if idea and 15<len(idea)<200:
+   try:await bot.send_message(O,"🧬 Rivojlantirish g'oyasi:\n\n"+idea+"\n\n/code "+idea)
+   except:pass
+ except Exception as e:log.error("evolve "+str(e)[:100])
+
+async def evolve_loop():
+ await asyncio.sleep(120)
+ while True:
+  try:await self_evolve()
+  except:pass
+  await asyncio.sleep(3600)
+
 async def main():
  global bot,E,P,V,D,GEMINI_KEY
  await ini(); bot=Bot(T); dp=Dispatcher()
@@ -406,6 +570,79 @@ async def main():
  asyncio.create_task(backup_loop())
  await make_backup()
  def ok(m): return m.from_user.id==O
+
+ @dp.message(Command("addservice"))
+ async def h_add(m):
+  if not ok(m):return
+  p=m.text[11:].split("|")
+  if len(p)<3:return await m.answer("Format: /addservice nom | url | tavsif | kalit(xohishiy)")
+  n=p[0].strip().lower();u=p[1].strip();d=p[2].strip();k=p[3].strip() if len(p)>3 else ""
+  x=svc_load();x[n]={"url":u,"desc":d,"key":k};svc_save(x)
+  await m.answer("✅ "+n+" qo'shildi")
+
+ @dp.message(Command("services"))
+ async def h_svc(m):
+  if not ok(m):return
+  x=svc_load()
+  if not x:return await m.answer("Xizmat yoq")
+  o=["🔌 Xizmatlar:"]
+  for k,v in x.items():o.append("• `"+k+"` — "+v["desc"][:50])
+  await m.answer("\n".join(o),parse_mode="Markdown")
+
+ @dp.message(Command("delservice"))
+ async def h_del(m):
+  if not ok(m):return
+  n=m.text[11:].strip().lower()
+  x=svc_load()
+  if n in x:del x[n];svc_save(x);await m.answer("🗑 "+n)
+  else:await m.answer("❌")
+
+ @dp.message(Command("call"))
+ async def h_call(m):
+  if not ok(m):return
+  p=m.text[5:].split(" ",1)
+  if len(p)<2:return await m.answer("Format: /call <nom> <matn>")
+  await m.answer("⏳...")
+  r=await call_service(p[0],p[1])
+  await m.answer(r[:3500])
+
+ @dp.message(Command("evolve"))
+ async def h_ev(m):
+  if not ok(m):return
+  await m.answer("🧬 Tahlil...")
+  await self_evolve()
+  await m.answer("✅ G'oya yuborildi")
+
+ @dp.message(Command("write"))
+ async def h_write(m):
+  if not ok(m):return
+  desc=m.text[7:].strip()
+  if not desc:return await m.answer("Format: /write <vazifa>")
+  await m.answer("🧠 Kod yozmoqda (10-30 soniya)...")
+  skill,err=await write_skill(desc)
+  if err:return await m.answer("❌ "+err)
+  name="s"+str(int(time.time()))[-6:]
+  d=dsk_load();d[name]=skill;dsk_save(d)
+  await m.answer("✅ `"+name+"` yaratildi\n\n```python\n"+skill["code"][:700]+"\n```\n\n/run "+name+" <args>",parse_mode="Markdown")
+
+ @dp.message(Command("run"))
+ async def h_run(m):
+  if not ok(m):return
+  p=m.text[5:].split(maxsplit=1)
+  if not p:return await m.answer("Format: /run <name> [args]")
+  name=p[0];args=p[1] if len(p)>1 else ""
+  await m.answer("⚙️ Ishlatilmoqda...")
+  r=await run_dskill(name,args)
+  await m.answer(str(r)[:4000])
+
+ @dp.message(Command("dskills"))
+ async def h_dskills(m):
+  if not ok(m):return
+  d=dsk_load()
+  if not d:return await m.answer("Skill yoq. /write bilan yarating.")
+  out=["🧠 Skillar:"]
+  for k,v in d.items():out.append("• `"+k+"` — "+v["desc"][:60])
+  await m.answer("\n".join(out),parse_mode="Markdown")
 
  @dp.message(Command("start"))
  async def h_start(m):
@@ -552,6 +789,20 @@ async def main():
   r=await approve(m.chat.id,aid)
   if r:await m.answer(f"✅ #{aid} tasdiqlandi")
   else:await m.answer("❌ Topilmadi")
+
+ @dp.message(Command("video"))
+ async def h_video(m):
+  if not ok(m):return
+  p=m.text[7:].strip()
+  if not p:return await m.answer("Format: /video <mavzu>")
+  await m.answer("🎬 Video yaratmoqda: "+p+"\n\nBu 2-5 daqiqa olishi mumkin...")
+  path,result=await make_video(p)
+  if path:
+   await m.answer("✅ "+str(result))
+   with open(path,"rb") as f:
+    await m.answer_video(f)
+  else:
+   await m.answer("❌ "+str(result))
 
  @dp.message(Command("build"))
  async def h_build(m):
