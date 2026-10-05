@@ -26,9 +26,18 @@ if not os.path.exists(C):
  print("SOZLASH:");o=input("TG ID: ");k=input("Groq: ");n=input("Ism: ") or "Janob"
  json.dump({"o":int(o),"k":k,"n":n,"v":"uz","d":"08:00","e":"","p":"","g":""},open(C,"w"))
 if not os.path.exists(SK): json.dump({},open(SK,"w"))
-c=json.load(open(C)); skills=json.load(open(SK))
-O=c.get("o");N=c.get("n");K=c.get("k");V=c.get("v","uz")
-D=c.get("d","08:00");E=c.get("e","");P=c.get("p","");GEMINI_KEY=c.get("g","")
+try: c=json.load(open(C))
+except: c={}
+try: skills=json.load(open(SK))
+except: skills={}
+O=int(os.getenv("OWNER_ID",c.get("o",0)))
+N=os.getenv("OWNER_NAME",c.get("n","Janob"))
+K=os.getenv("GROQ_API_KEY",c.get("k",""))
+V=os.getenv("LANGUAGE",c.get("v","uz"))
+D=os.getenv("DAILY_TIME",c.get("d","08:00"))
+E=os.getenv("GMAIL_USER",c.get("e",""))
+P=os.getenv("GMAIL_PASS",c.get("p",""))
+GEMINI_KEY=os.getenv("GEMINI_API_KEY",c.get("g",""))
 logging.basicConfig(level=logging.INFO,format="%(message)s")
 log=logging.getLogger("j")
 g=AsyncGroq(api_key=K); db=None; TMx=WMx=None; bot=None
@@ -207,13 +216,6 @@ async def gemini_img(img_b64,prompt="Bu rasmda nima? O'zbek tilida ayt."):
   return r.json()["candidates"][0]["content"]["parts"][0]["text"]
  except Exception as e: return "Xato: "+str(e)[:200]
 
-def smart_model(txt):
- low=txt.lower()
- if any(k in low for k in["kod","code","python","function","dastur"]):
-  return "coding"
- if any(k in low for k in["hisobla","matematika","mantiq","analiz"]):
-  return "reasoning"
- return "fast"
 
 async def make_backup():
  try:
@@ -238,6 +240,49 @@ async def backup_loop():
  while True:
   await asyncio.sleep(86400)
   await make_backup()
+
+DATA_CREDS=os.path.expanduser("~/credentials.json")
+
+async def social_post(platform,text,media=None):
+ import subprocess
+ base=os.path.expanduser("~/jarvis_full/VyAgent-AI-Assistant")
+ if not os.path.exists(base):
+  return "❌ VyAgent topilmadi"
+ try:
+  cmd=["node","index.js","post",platform,text]
+  if media:cmd.append(media)
+  r=subprocess.run(cmd,cwd=base,capture_output=True,text=True,timeout=120)
+  if r.returncode==0:return f"✅ {platform}ga joylandi"
+  return f"❌ {r.stderr[:200]}"
+ except Exception as e:return f"❌ {e}"
+
+def save_cred(service,data):
+ try:
+  all_c={}
+  if os.path.exists(DATA_CREDS):
+   all_c=json.load(open(DATA_CREDS))
+  all_c[service.lower()]=data
+  json.dump(all_c,open(DATA_CREDS,"w"),indent=2)
+  return True
+ except:return False
+
+def list_creds():
+ try:
+  if not os.path.exists(DATA_CREDS):return []
+  return list(json.load(open(DATA_CREDS)).keys())
+ except:return []
+
+async def try_signup(url,email,password):
+ try:
+  ua="Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36"
+  async with httpx.AsyncClient(timeout=20,follow_redirects=True,headers={"User-Agent":ua}) as cl:
+   r=await cl.get(url)
+  if r.status_code>=400:return {"ok":False,"message":"HTTP "+str(r.status_code)}
+  low=r.text.lower()
+  if "captcha" in low or "cloudflare" in low:
+   return {"ok":False,"message":"To'siq: CAPTCHA/Cloudflare"}
+  return {"ok":False,"message":"Sayt JS talab qiladi"}
+ except Exception as e:return {"ok":False,"message":str(e)[:200]}
 
 async def need_approval(cid,action):
  await db.execute("INSERT INTO approvals(c,action,status,ts) VALUES(?,?,?,?)",(cid,action,"pending",datetime.datetime.now().isoformat()))
@@ -360,6 +405,8 @@ async def main():
  await ini(); bot=Bot(T); dp=Dispatcher()
  asyncio.create_task(rem_loop())
  asyncio.create_task(daily_loop())
+ asyncio.create_task(backup_loop())
+ await make_backup()
  def ok(m): return m.from_user.id==O
 
  @dp.message(Command("start"))
@@ -552,14 +599,10 @@ async def main():
   p=m.text.split(maxsplit=2)
   if len(p)<3: return await m.answer("Format: /signup <service> <url>")
   svc=p[1].strip().lower(); url=p[2].strip()
-  try:
-   sys.path.insert(0,os.path.expanduser("~/jarvis_full"))
-   from tools.auto_signup import try_signup
-   await m.answer(f"🔍 {svc}...")
-   r=await try_signup(url,"auto","auto")
-   if r.get("ok"): await m.answer(f"✅ {svc} ro'yxatdan o'tdi")
-   else: await m.answer(f"⚠️ {r.get('message','')}\n\n🔗 {url}\n\nQo'lda ro'yxatdan o'tib:\n/give {svc} user:pass:email")
-  except Exception as e: await m.answer(f"❌ {e}")
+  await m.answer(f"🔍 {svc}...")
+  r=await try_signup(url,"auto","auto")
+  if r.get("ok"): await m.answer(f"✅ {svc} ro'yxatdan o'tdi")
+  else: await m.answer(f"⚠️ {r.get('message','')}\n\n🔗 {url}\n\nQo'lda ro'yxatdan o'tib:\n/give {svc} user:pass:email")
 
  @dp.message(Command("give"))
  async def h_give(m):
@@ -567,27 +610,19 @@ async def main():
   p=m.text.split(maxsplit=2)
   if len(p)<3: return await m.answer("Format: /give <service> <user:pass:email>")
   svc=p[1].strip().lower(); data=p[2].strip()
-  try:
-   sys.path.insert(0,os.path.expanduser("~/jarvis_full"))
-   from tools.auto_signup import save_cred
-   parts=data.split(":")
-   cred={"raw":data}
-   if len(parts)>=2: cred["username"]=parts[0]; cred["password"]=parts[1]
-   if len(parts)>=3: cred["email"]=parts[2]
-   if save_cred(svc,cred): await m.answer(f"✅ {svc} saqlandi")
-   else: await m.answer("❌ Saqlanmadi")
-  except Exception as e: await m.answer(f"❌ {e}")
+  parts=data.split(":")
+  cred={"raw":data}
+  if len(parts)>=2: cred["username"]=parts[0]; cred["password"]=parts[1]
+  if len(parts)>=3: cred["email"]=parts[2]
+  if save_cred(svc,cred): await m.answer(f"✅ {svc} saqlandi")
+  else: await m.answer("❌ Saqlanmadi")
 
  @dp.message(Command("creds"))
  async def h_creds(m):
   if not ok(m): return
-  try:
-   sys.path.insert(0,os.path.expanduser("~/jarvis_full"))
-   from tools.auto_signup import list_creds
-   cc=list_creds()
-   if not cc: return await m.answer("📋 Yo'q")
-   await m.answer("📋 Akkauntlar:\n"+"\n".join(f"• {s}" for s in cc))
-  except Exception as e: await m.answer(f"❌ {e}")
+  cc=list_creds()
+  if not cc: return await m.answer("📋 Yo'q")
+  await m.answer("📋 Akkauntlar:\n"+"\n".join(f"• {s}" for s in cc))
 
  @dp.message(Command("post"))
  async def h_post(m):
@@ -595,13 +630,9 @@ async def main():
   p=m.text[6:].split("|",1)
   if len(p)<2: return await m.answer("Format: /post instagram | Matn")
   plat=p[0].strip().lower(); text=p[1].strip()
-  try:
-   sys.path.insert(0,os.path.expanduser("~/jarvis_full"))
-   from tools.social import post as sp
-   await m.answer(f"📤 {plat}...")
-   r=await sp(plat,text)
-   await m.answer(r)
-  except Exception as e: await m.answer(f"❌ {e}")
+  await m.answer(f"📤 {plat}...")
+  r=await social_post(plat,text)
+  await m.answer(r)
 
  @dp.message(Command("daily"))
  async def h_daily(m):
