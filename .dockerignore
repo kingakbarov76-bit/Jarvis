@@ -1,0 +1,8 @@
+__pycache__
+*.pyc
+*.log
+.DS_Store
+j.db
+jskills.json
+jarvis_full/
+PocketStrike-AI/
