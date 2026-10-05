@@ -10,7 +10,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY j.py .
-COPY jcfg.json .
 
 EXPOSE 8080
 
