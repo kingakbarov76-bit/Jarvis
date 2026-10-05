@@ -1,5 +1,12 @@
 """JARVIS Auto-Core — o'zi qidiradi, qo'shadi, tuzatadi."""
 import os, json, ast, asyncio, time, shutil, subprocess, re, httpx
+sys_path = os.path.expanduser('~')
+import sys
+sys.path.insert(0, sys_path)
+try:
+    import auto_signup
+except Exception:
+    auto_signup = None
 
 HOME = os.path.expanduser("~")
 SKILLS = os.path.join(HOME, "skills")

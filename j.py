@@ -728,6 +728,49 @@ async def main():
   n=await auto_core.self_analyze(O,bot,g,TMx)
   await m.answer(("✅ "+str(n)) if n else "🤔 G'oya yo'q")
 
+ @dp.message(Command("tempmail"))
+ async def h_tempmail(m):
+  if not ok(m) or auto_core is None:return
+  import auto_signup as asg
+  r=await asg.create_temp_email()
+  if not r or r.get("error"):return await m.answer("❌ "+str(r))
+  c["tm"]=r;json.dump(c,open(C,"w"))
+  await m.answer(f"📧 Vaqtinchalik email:\n`{r['email']}`\nParol: `{r['password']}`",parse_mode="Markdown")
+
+ @dp.message(Command("inbox"))
+ async def h_inbox(m):
+  if not ok(m) or auto_core is None:return
+  import auto_signup as asg
+  if not c.get("tm"):return await m.answer("Avval /tempmail qiling")
+  msgs=await asg.read_temp_inbox(c["tm"]["token"])
+  if not msgs:return await m.answer("📭 Bo'sh")
+  out=["📧 Xatlar:"]
+  for x in msgs:out.append(f"• {x.get('from','?')} — {x.get('subject','?')}")
+  await m.answer("\n".join(out))
+
+ @dp.message(Command("otp_temp"))
+ async def h_otp_temp(m):
+  if not ok(m) or auto_core is None:return
+  import auto_signup as asg
+  if not c.get("tm"):return await m.answer("Avval /tempmail qiling")
+  msgs=await asg.read_temp_inbox(c["tm"]["token"])
+  for x in msgs:
+   txt=await asg.read_message(c["tm"]["token"],x["id"])
+   otp=await asg.extract_otp(txt)
+   if otp:return await m.answer(f"🔑 OTP: `{otp}`",parse_mode="Markdown")
+  await m.answer("❌ OTP topilmadi")
+
+ @dp.message(Command("check"))
+ async def h_check(m):
+  if not ok(m) or auto_core is None:return
+  p2=m.text[7:].strip()
+  if not p2:return await m.answer("Format: /check <url>")
+  import auto_signup as asg
+  r=await asg.try_auto_signup(p2)
+  if r["status"]=="ready":await m.answer(f"✅ {p2}\nTo'siq yo'q — /autosignup {p2}")
+  elif r["status"]=="blocked":await m.answer(f"⚠️ {p2}\nTo'siq: {r['protection']}\nMen buni yecha olmayman.")
+  else:await m.answer(f"❌ {r['message']}")
+
  @dp.message(Command("start"))
  async def h_start(m):
   if not ok(m): return
