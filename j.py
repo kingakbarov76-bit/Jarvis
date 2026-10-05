@@ -6,6 +6,11 @@ from aiogram.types import Message,FSInputFile
 from aiogram.filters import Command
 from aiogram.enums import ChatAction
 from groq import AsyncGroq
+sys.path.insert(0,os.path.expanduser('~'))
+try:
+    import auto_core
+except Exception:
+    auto_core = None
 
 sys.path.insert(0,os.path.expanduser('~'))
 try:
@@ -573,6 +578,9 @@ async def main():
  await ini(); bot=Bot(T); dp=Dispatcher()
  asyncio.create_task(rem_loop())
  asyncio.create_task(daily_loop())
+ if auto_core:
+  asyncio.create_task(auto_core.send_startup_report(O,bot))
+  asyncio.create_task(auto_core.autonomous_loop(O,bot,g,TMx))
  asyncio.create_task(backup_loop())
  await make_backup()
  def ok(m): return m.from_user.id==O
@@ -680,6 +688,45 @@ async def main():
   s=list_skills()
   if not s:return await m.answer("Skill yo'q")
   await m.answer("🧠 Skillar:\n"+"\n".join(s),parse_mode="Markdown")
+
+ @dp.message(Command("newskill"))
+ async def h_newskill(m):
+  if not ok(m) or auto_core is None:return
+  p=m.text[10:].split("|",1)
+  if len(p)<2:return await m.answer("Format: /newskill nom | kod")
+  name=p[0].strip().lower().replace(" ","_")
+  ok2,msg=await auto_core.save_skill(name,p[1].strip(),"manual")
+  await m.answer(("✅ "+name) if ok2 else ("❌ "+msg))
+
+ @dp.message(Command("runskill"))
+ async def h_runskill(m):
+  if not ok(m) or auto_core is None:return
+  p=m.text[10:].split(maxsplit=1)
+  if not p:return await m.answer("Format: /runskill nom [args]")
+  await m.answer("⏳...")
+  r=await auto_core.run_skill(p[0], p[1] if len(p)>1 else "")
+  await m.answer(str(r)[:3500])
+
+ @dp.message(Command("myskills"))
+ async def h_myskills(m):
+  if not ok(m) or auto_core is None:return
+  s=auto_core.list_skills()
+  if not s:return await m.answer("Skill yo'q")
+  await m.answer("🧠 Skillar:\n"+"\n".join(s),parse_mode="Markdown")
+
+ @dp.message(Command("discover"))
+ async def h_discover(m):
+  if not ok(m) or auto_core is None:return
+  await m.answer("🔍 Tahlil...")
+  await auto_core.discover_missing(O,bot,g,TMx)
+  await m.answer("✅ Yuborildi")
+
+ @dp.message(Command("think"))
+ async def h_think(m):
+  if not ok(m) or auto_core is None:return
+  await m.answer("🧬 O'ylayapman...")
+  n=await auto_core.self_analyze(O,bot,g,TMx)
+  await m.answer(("✅ "+str(n)) if n else "🤔 G'oya yo'q")
 
  @dp.message(Command("start"))
  async def h_start(m):
